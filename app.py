@@ -10,7 +10,6 @@ from catboost import Pool
 # =====================================================
 st.set_page_config(
     page_title="Dangerous Goods Incident Prediction",
-    page_icon="⚠️",
     layout="wide"
 )
 
@@ -37,7 +36,7 @@ except Exception as e:
 # =====================================================
 # UI HEADER
 # =====================================================
-st.title("⚠️ Dangerous Goods Incident Prediction")
+st.title("Dangerous Goods Incident Prediction")
 st.markdown("Calculate shipment risk magnitude using operational and cargo parameters.")
 st.divider()
 
@@ -45,7 +44,7 @@ st.divider()
 # INPUT FORM
 # =====================================================
 with st.form("prediction_form"):
-    st.subheader("📦 Shipment Parameters")
+    st.subheader("Shipment Parameters")
     
     col1, col2, col3 = st.columns(3)
 
@@ -60,7 +59,7 @@ with st.form("prediction_form"):
         cargo_weight_kg = st.number_input("Cargo Weight (kg)", min_value=0.0, value=15000.0)
         temperature_celsius = st.number_input("Temperature (°C)", value=25.0)
         humidity_percentage = st.number_input("Humidity (%)", min_value=0.0, max_value=100.0, value=50.0)
-        safety_staff_count = st.number_input("Safety Staff Count", min_value=0, value=10)
+        safety_staff_count = st.number_input("Safety Staff Count", min_value=1, value=10)
         doc_audit_result = st.selectbox("Document Audit", [0, 1], format_func=lambda x: "Pass" if x == 1 else "Fail")
 
     with col3:
@@ -68,7 +67,7 @@ with st.form("prediction_form"):
         previous_incident_count = st.number_input("Previous Incident Count", min_value=0, value=0)
         
 
-    submit = st.form_submit_button("🚀 Run Risk Assessment")
+    submit = st.form_submit_button(" Run Risk Assessment")
 
 # =====================================================
 # PREDICTION LOGIC
@@ -124,17 +123,17 @@ if submit:
         display_score = max(0.0, min(float(risk_score), 1.0))
 
         st.divider()
-        st.subheader("🎯 Prediction Result")
+        st.subheader("Prediction Result")
 
         m1, m2 = st.columns([1, 2])
         
         with m1:
             if risk_score >= 0.7:
-                st.error("🚨 **HIGH RISK**")
+                st.error("**HIGH RISK**")
             elif risk_score >= 0.4:
-                st.warning("⚠️ **MEDIUM RISK**")
+                st.warning("**MEDIUM RISK**")
             else:
-                st.success("✅ **LOW RISK**")
+                st.success("**LOW RISK**")
             
             st.metric("Predicted Risk Score", f"{risk_score:.2%}")
 
@@ -143,7 +142,7 @@ if submit:
             st.progress(display_score)
             
         # UI Reason Codes
-        st.write("### 🔍 Risk Reason Codes")
+        st.write("### Risk Reason Codes")
         reasons = []
         if handling_error_count > 7: reasons.append("CRITICAL MISHANDLING: High error count detected.")
         if dg_class in [2.1, 3.0, 4.0]: reasons.append(f"VOLATILE COMMODITY: Class {dg_class} high hazard.")
