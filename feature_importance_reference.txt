@@ -1,0 +1,23 @@
+
+Expected Feature Importance Ranking for DG Incident Prediction (CO-004)
+
+1. handling_error_count
+2. doc_audit_result
+3. previous_incident_count
+4. origin_destination
+5. dg_class
+6. packaging_type
+7. shc_code
+8. weather_condition
+9. temperature_celsius
+10. safety_staff_count
+11. cargo_weight_kg
+12. humidity_percentage
+13. shipper_id
+
+Key Embedded Patterns:
+- Handling errors > 7 dramatically increase incident probability.
+- OSL-JED routes with DG Class 2.x and 3 have elevated thermal expansion risk.
+- Documentation failures significantly increase safety violations.
+- CAO shipments with weak packaging types raise risk probability.
+- Shippers with prior incident histories carry elevated baseline risk.
