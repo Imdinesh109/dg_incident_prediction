@@ -2,166 +2,655 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
-from datetime import datetime
+import shap
+import plotly.express as px
+import plotly.graph_objects as go
+
 from catboost import Pool
 
 # =====================================================
 # PAGE CONFIGURATION
 # =====================================================
+
 st.set_page_config(
-    page_title="Dangerous Goods Incident Prediction",
+    page_title="DG Incident Prediction",
     layout="wide"
 )
 
 # =====================================================
-# LOAD DATA & MODEL
+# LOAD DATA AND MODEL
 # =====================================================
+
 @st.cache_data
 def load_reference_data():
-    # Used to populate dropdowns from the test set
     return pd.read_csv("dg_incident_test.csv")
+
 
 @st.cache_resource
 def load_model():
-    # Loads the CatBoostRegressor model
     return joblib.load("dg_incident_model.pkl")
+
 
 try:
     reference_df = load_reference_data()
     model = load_model()
+
 except Exception as e:
     st.error(f"Error loading required files: {e}")
     st.stop()
 
 # =====================================================
-# UI HEADER
+# HEADER
 # =====================================================
+
 st.title("Dangerous Goods Incident Prediction")
-st.markdown("Calculate shipment risk magnitude using operational and cargo parameters.")
+
+st.markdown(
+    """
+    AI-Powered Cargo Safety Risk Assessment System
+    """
+)
+
 st.divider()
 
 # =====================================================
 # INPUT FORM
 # =====================================================
+
 with st.form("prediction_form"):
-    st.subheader("Shipment Parameters")
-    
+
+    st.subheader("Shipment and Operational Inputs")
+
     col1, col2, col3 = st.columns(3)
 
+    # =================================================
+    # COLUMN 1
+    # =================================================
+
     with col1:
-        shc_code = st.selectbox("SHC Code", sorted(reference_df['shc_code'].unique()))
-        origin_destination = st.selectbox("Origin-Destination", sorted(reference_df['origin_destination'].unique()))
-        dg_class = st.selectbox("DG Class", sorted(reference_df['dg_class'].astype(float).unique()))
-        packaging_type = st.selectbox("Packaging Type", sorted(reference_df['packaging_type'].unique()))
-        weather_condition = st.selectbox("Weather Condition", sorted(reference_df['weather_condition'].unique()))
+
+        st.markdown("### Cargo and Route")
+
+        shc_code = st.selectbox(
+            "SHC Code",
+            sorted(reference_df["shc_code"].astype(str).unique())
+        )
+
+        origin_destination = st.selectbox(
+            "Route",
+            sorted(reference_df["origin_destination"].astype(str).unique())
+        )
+
+        dg_class = st.selectbox(
+            "DG Class",
+            sorted(reference_df["dg_class"].astype(float).unique())
+        )
+
+        packaging_type = st.selectbox(
+            "Packaging Type",
+            sorted(reference_df["packaging_type"].astype(str).unique())
+        )
+
+        weather_condition = st.selectbox(
+            "Weather Condition",
+            sorted(reference_df["weather_condition"].astype(str).unique())
+        )
+
+    # =================================================
+    # COLUMN 2
+    # =================================================
 
     with col2:
-        cargo_weight_kg = st.number_input("Cargo Weight (kg)", min_value=0.0, value=15000.0)
-        temperature_celsius = st.number_input("Temperature (°C)", value=25.0)
-        humidity_percentage = st.number_input("Humidity (%)", min_value=0.0, max_value=100.0, value=50.0)
-        safety_staff_count = st.number_input("Safety Staff Count", min_value=1, value=10)
-        doc_audit_result = st.selectbox("Document Audit", [0, 1], format_func=lambda x: "Pass" if x == 1 else "Fail")
+
+        st.markdown("### Environmental and Time")
+
+        cargo_weight_kg = st.number_input(
+            "Cargo Weight (kg)",
+            min_value=0.0,
+            value=15000.0
+        )
+
+        temperature_celsius = st.number_input(
+            "Temperature (°C)",
+            value=25.0
+        )
+
+        humidity_percentage = st.number_input(
+            "Humidity (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=50.0
+        )
+
+        shipment_hour = st.slider(
+            "Shipment Hour",
+            0,
+            23,
+            12
+        )
+
+        shipment_day_of_week = st.selectbox(
+            "Shipment Day",
+            options=[0, 1, 2, 3, 4, 5, 6],
+            format_func=lambda x:
+            ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][x]
+        )
+
+        shipment_month = st.slider(
+            "Shipment Month",
+            1,
+            12,
+            5
+        )
+
+    # =================================================
+    # COLUMN 3
+    # =================================================
 
     with col3:
-        handling_error_count = st.number_input("Handling Error Count", min_value=0, value=0)
-        previous_incident_count = st.number_input("Previous Incident Count", min_value=0, value=0)
-        
 
-    submit = st.form_submit_button(" Run Risk Assessment")
+        st.markdown("### Compliance and History")
+
+        handling_error_count = st.number_input(
+            "Handling Error Count",
+            min_value=0,
+            value=0
+        )
+
+        previous_incident_count = st.number_input(
+            "Previous Incident Count",
+            min_value=0,
+            value=0
+        )
+
+        safety_staff_count = st.number_input(
+            "Safety Staff Count",
+            min_value=0,
+            value=10
+        )
+
+        doc_audit_result = st.radio(
+            "Documentation Audit",
+            options=[1, 0],
+            format_func=lambda x:
+            "Pass" if x == 1 else "Fail"
+        )
+
+    submit = st.form_submit_button(
+        "Run Risk Assessment",
+        use_container_width=True
+    )
 
 # =====================================================
-# PREDICTION LOGIC
+# PREDICTION SECTION
 # =====================================================
+
 if submit:
-    # 1. Automatic Temporal Feature Extraction (REQUIRED BY MODEL)
-    now = datetime.now()
-    shipment_hour = now.hour
-    shipment_day_of_week = now.weekday() # 0=Mon, 6=Sun
-    shipment_month = now.month
 
-    # 2. Replicate Feature Engineering Logic
-    is_critical_mishandling = 1 if handling_error_count > 7 else 0
-    climate_shock_risk = 1 if (origin_destination == 'OSL-JED' and temperature_celsius > 30) else 0
-    is_untrusted_shipper = 1 if previous_incident_count > 5 else 0
+    # =================================================
+    # FEATURE ENGINEERING
+    # =================================================
 
-    gas_handling_risk = 1 if (dg_class == 2.1 and handling_error_count > 5) else 0
-    thermal_expansion_risk = 1 if (origin_destination == 'OSL-JED' and temperature_celsius > 35 and dg_class == 3.0) else 0
-    shipper_hazard_combo = 1 if (previous_incident_count > 5 and shc_code == 'CAO') else 0
+    is_critical_mishandling = 1 if (
+        int(handling_error_count) > 7
+    ) else 0
 
-    # 3. Construct Dataframe with ALL 21 features in EXACT order
+    is_untrusted_shipper = 1 if (
+        int(previous_incident_count) > 5
+    ) else 0
+
+    climate_shock_risk = 1 if (
+        str(origin_destination) == "OSL-JED"
+        and float(temperature_celsius) > 30
+    ) else 0
+
+    gas_handling_risk = 1 if (
+        round(float(dg_class), 1) == 2.1
+        and int(handling_error_count) > 5
+    ) else 0
+
+    thermal_expansion_risk = 1 if (
+        str(origin_destination) == "OSL-JED"
+        and float(temperature_celsius) > 35
+        and round(float(dg_class), 1) == 3.0
+    ) else 0
+
+    shipper_hazard_combo = 1 if (
+        int(previous_incident_count) > 5
+        and str(shc_code) == "CAO"
+    ) else 0
+
+    # =================================================
+    # INPUT DATAFRAME
+    # =================================================
+
     input_dict = {
-        'shc_code': [str(shc_code)],
-        'origin_destination': [str(origin_destination)],
-        'dg_class': [float(dg_class)],
-        'packaging_type': [str(packaging_type)],
-        'handling_error_count': [int(handling_error_count)],
-        'previous_incident_count': [int(previous_incident_count)],
-        'cargo_weight_kg': [float(cargo_weight_kg)],
-        'temperature_celsius': [float(temperature_celsius)],
-        'humidity_percentage': [float(humidity_percentage)],
-        'weather_condition': [str(weather_condition)],
-        'safety_staff_count': [int(safety_staff_count)],
-        'doc_audit_result': [int(doc_audit_result)],
-        'shipment_hour': [int(shipment_hour)],
-        'shipment_day_of_week': [int(shipment_day_of_week)],
-        'shipment_month': [int(shipment_month)],
-        'is_critical_mishandling': [int(is_critical_mishandling)],
-        'climate_shock_risk': [int(climate_shock_risk)],
-        'is_untrusted_shipper': [int(is_untrusted_shipper)],
-        'gas_handling_risk': [int(gas_handling_risk)],
-        'thermal_expansion_risk': [int(thermal_expansion_risk)],
-        'shipper_hazard_combo': [int(shipper_hazard_combo)]
+
+        "shc_code": [str(shc_code)],
+
+        "origin_destination": [str(origin_destination)],
+
+        "dg_class": [float(dg_class)],
+
+        "packaging_type": [str(packaging_type)],
+
+        "handling_error_count": [int(handling_error_count)],
+
+        "previous_incident_count": [
+            int(previous_incident_count)
+        ],
+
+        "cargo_weight_kg": [float(cargo_weight_kg)],
+
+        "temperature_celsius": [
+            float(temperature_celsius)
+        ],
+
+        "humidity_percentage": [
+            float(humidity_percentage)
+        ],
+
+        "weather_condition": [
+            str(weather_condition)
+        ],
+
+        "safety_staff_count": [
+            int(safety_staff_count)
+        ],
+
+        "doc_audit_result": [
+            int(doc_audit_result)
+        ],
+
+        "shipment_hour": [
+            int(shipment_hour)
+        ],
+
+        "shipment_day_of_week": [
+            int(shipment_day_of_week)
+        ],
+
+        "shipment_month": [
+            int(shipment_month)
+        ],
+
+        "is_critical_mishandling": [
+            int(is_critical_mishandling)
+        ],
+
+        "is_untrusted_shipper": [
+            int(is_untrusted_shipper)
+        ],
+
+        "climate_shock_risk": [
+            int(climate_shock_risk)
+        ],
+
+        "gas_handling_risk": [
+            int(gas_handling_risk)
+        ],
+
+        "thermal_expansion_risk": [
+            int(thermal_expansion_risk)
+        ],
+
+        "shipper_hazard_combo": [
+            int(shipper_hazard_combo)
+        ],
     }
-    
+
     input_data = pd.DataFrame(input_dict)
 
+    # =================================================
+    # CATBOOST POOL
+    # =================================================
+
+    prediction_pool = Pool(
+        data=input_data,
+        cat_features=[
+            "shc_code",
+            "origin_destination",
+            "packaging_type",
+            "weather_condition"
+        ]
+    )
+
+    # =================================================
+    # PREDICTION
+    # =================================================
+
     try:
-        # Predict Risk Score using Regressor
-        risk_score = model.predict(input_data)[0]
-        
-        # Clip value for progress bar safety
-        display_score = max(0.0, min(float(risk_score), 1.0))
+
+        raw_prediction = model.predict(
+            prediction_pool
+        )[0]
+
+        risk_score = float(
+            np.clip(raw_prediction, 0.0, 1.0)
+        )
+
+        # =================================================
+        # RISK LEVEL
+        # =================================================
+
+        if risk_score >= 0.75:
+            risk_level = "HIGH"
+
+        elif risk_score >= 0.45:
+            risk_level = "MEDIUM"
+
+        else:
+            risk_level = "LOW"
+
+        # =================================================
+        # METRICS
+        # =================================================
 
         st.divider()
-        st.subheader("Prediction Result")
 
-        m1, m2 = st.columns([1, 2])
-        
-        with m1:
-            if risk_score >= 0.7:
-                st.error("**HIGH RISK**")
-            elif risk_score >= 0.4:
-                st.warning("**MEDIUM RISK**")
-            else:
-                st.success("**LOW RISK**")
-            
-            st.metric("Predicted Risk Score", f"{risk_score:.2%}")
+        metric1, metric2, metric3 = st.columns(3)
 
-        with m2:
-            st.write("Risk Magnitude")
-            st.progress(display_score)
-            
-        # UI Reason Codes
-        st.write("### Risk Reason Codes")
-        reasons = []
-        if handling_error_count > 7: reasons.append("CRITICAL MISHANDLING: High error count detected.")
-        if dg_class in [2.1, 3.0, 4.0]: reasons.append(f"VOLATILE COMMODITY: Class {dg_class} high hazard.")
-        if climate_shock_risk: reasons.append("CLIMATE SHOCK: Route/Temperature expansion risk.")
-        if is_untrusted_shipper: reasons.append("SHIPPER HISTORY: Previous safety violations.")
-        if gas_handling_risk: reasons.append("COMPOUND RISK: Flammable gas mishandling.")
-        
-        if reasons:
-            for r in reasons:
-                st.info(r)
+        with metric1:
+            st.metric(
+                "Risk Score",
+                f"{risk_score:.1%}"
+            )
+
+        with metric2:
+            st.metric(
+                "Risk Level",
+                risk_level
+            )
+
+        with metric3:
+            st.metric(
+                "DG Class",
+                dg_class
+            )
+
+        # =================================================
+        # RISK GAUGE
+        # =================================================
+
+        st.subheader("Overall Risk Magnitude")
+
+        gauge_fig = go.Figure(
+            go.Indicator(
+
+                mode="gauge+number",
+
+                value=risk_score * 100,
+
+                number={
+                    'suffix': "%"
+                },
+
+                gauge={
+
+                    'axis': {
+                        'range': [0, 100]
+                    },
+
+                    'bar': {
+                        'thickness': 0.3
+                    },
+
+                    'steps': [
+
+                        {
+                            'range': [0, 45],
+                            'color': "#A8E6A3"
+                        },
+
+                        {
+                            'range': [45, 75],
+                            'color': "#FFD580"
+                        },
+
+                        {
+                            'range': [75, 100],
+                            'color': "#FF8A80"
+                        }
+                    ]
+                }
+            )
+        )
+
+        gauge_fig.update_layout(
+
+            height=350,
+
+            margin=dict(
+                l=20,
+                r=20,
+                t=40,
+                b=20
+            )
+        )
+
+        st.plotly_chart(
+            gauge_fig,
+            use_container_width=True
+        )
+
+        # =================================================
+        # FEATURE CONTRIBUTION ANALYSIS
+        # =================================================
+
+        st.divider()
+
+        st.subheader(
+            "Feature Contribution Analysis"
+        )
+
+        # SHAP EXPLAINER
+
+        explainer = shap.TreeExplainer(model)
+
+        shap_values = explainer.shap_values(
+            prediction_pool
+        )
+
+        # =================================================
+        # CREATE CONTRIBUTION DATAFRAME
+        # =================================================
+
+        contribution_df = pd.DataFrame({
+
+            "Feature": input_data.columns,
+
+            "Contribution": np.abs(shap_values[0])
+        })
+
+        # =================================================
+        # CONVERT TO PERCENTAGE
+        # =================================================
+
+        contribution_df["ContributionPercent"] = (
+            contribution_df["Contribution"] * 100
+        )
+
+        # =================================================
+        # REMOVE VERY SMALL CONTRIBUTIONS
+        # ONLY KEEP > 0.5%
+        # =================================================
+
+        contribution_df = contribution_df[
+            contribution_df["ContributionPercent"] > 0.5
+        ]
+
+        # =================================================
+        # SORT
+        # =================================================
+
+        contribution_df = contribution_df.sort_values(
+            by="ContributionPercent",
+            ascending=True
+        )
+
+        # =================================================
+        # SHOW GRAPH ONLY IF FEATURES EXIST
+        # =================================================
+
+        if len(contribution_df) > 0:
+
+            contribution_fig = px.bar(
+
+                contribution_df,
+
+                x="ContributionPercent",
+
+                y="Feature",
+
+                orientation="h",
+
+                height=600,
+
+                title="Feature Influence on Current Prediction",
+
+                text="ContributionPercent"
+            )
+
+            contribution_fig.update_traces(
+
+                texttemplate='%{text:.2f}%',
+
+                textposition="outside"
+            )
+
+            contribution_fig.update_layout(
+
+                title_font_size=22,
+
+                font_size=14,
+
+                margin=dict(
+                    l=20,
+                    r=20,
+                    t=60,
+                    b=20
+                ),
+
+                xaxis_title="Contribution (%)",
+
+                yaxis_title="",
+
+                template="simple_white"
+            )
+
+            st.plotly_chart(
+                contribution_fig,
+                use_container_width=True
+            )
+
+            # =================================================
+            # DETAILED TABLE
+            # =================================================
+
+            st.subheader(
+                "Detailed Feature Influence"
+            )
+
+            display_df = contribution_df.sort_values(
+                by="ContributionPercent",
+                ascending=False
+            )[
+                ["Feature", "ContributionPercent"]
+            ]
+
+            display_df["ContributionPercent"] = (
+                display_df["ContributionPercent"]
+                .round(2)
+                .astype(str) + "%"
+            )
+
+            display_df.columns = [
+                "Feature",
+                "Contribution"
+            ]
+
+            st.dataframe(
+                display_df,
+                use_container_width=True
+            )
+
         else:
-            st.write("No critical risk combinations triggered.")
 
-        with st.expander("View Full Model Input (21 Features)"):
-            st.dataframe(input_data)
+            st.info(
+                "No significant feature contributions detected."
+            )
+
+        # =================================================
+        # OPERATIONAL AUDIT LOGS
+        # =================================================
+
+        st.divider()
+
+        st.subheader(
+            "Operational Risk Audit"
+        )
+
+        reasons = []
+
+        if is_critical_mishandling:
+
+            reasons.append(
+                "Critical mishandling threshold exceeded."
+            )
+
+        if gas_handling_risk:
+
+            reasons.append(
+                "Gas handling operational instability detected."
+            )
+
+        if thermal_expansion_risk:
+
+            reasons.append(
+                "Thermal expansion hazard detected."
+            )
+
+        if shipper_hazard_combo:
+
+            reasons.append(
+                "High-risk shipper and CAO combination detected."
+            )
+
+        if climate_shock_risk:
+
+            reasons.append(
+                "Climate shock route-temperature condition detected."
+            )
+
+        if is_untrusted_shipper:
+
+            reasons.append(
+                "Historical shipper incidents exceed threshold."
+            )
+
+        if len(reasons) == 0:
+
+            st.success(
+                "No major operational risk indicators detected."
+            )
+
+        else:
+
+            for r in reasons:
+                st.warning(r)
 
     except Exception as e:
-        st.error(f"**Prediction Error:** {e}")
-        st.info("Note: The model expects 21 features. Check if 'shipment_hour', 'shipment_day_of_week', and 'shipment_month' were dropped in training.")
+
+        st.error(
+            f"Prediction Error: {e}"
+        )
+
+# =====================================================
+# FOOTER
+# =====================================================
 
 st.divider()
-st.caption("DG Safety Prediction System | Powered by CatBoostRegressor")
+
+st.caption(
+    "Cargo Safety Analytics Dashboard | CatBoostRegressor"
+)
