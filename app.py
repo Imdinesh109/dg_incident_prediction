@@ -262,6 +262,10 @@ if submit:
             int(doc_audit_result)
         ],
 
+        # =================================================
+        # TIME FEATURES
+        # =================================================
+
         "shipment_hour": [
             int(shipment_hour)
         ],
@@ -273,6 +277,10 @@ if submit:
         "shipment_month": [
             int(shipment_month)
         ],
+
+        # =================================================
+        # ENGINEERED FEATURES
+        # =================================================
 
         "is_critical_mishandling": [
             int(is_critical_mishandling)
@@ -443,7 +451,9 @@ if submit:
             "Feature Contribution Analysis"
         )
 
+        # =================================================
         # SHAP EXPLAINER
+        # =================================================
 
         explainer = shap.TreeExplainer(model)
 
@@ -463,16 +473,21 @@ if submit:
         })
 
         # =================================================
-        # CONVERT TO PERCENTAGE
+        # CALCULATE PERCENTAGES
         # =================================================
 
-        contribution_df["ContributionPercent"] = (
-            contribution_df["Contribution"] * 100
+        total_contribution = (
+            contribution_df["Contribution"]
+            .sum()
         )
+
+        contribution_df["ContributionPercent"] = (
+            contribution_df["Contribution"]
+            / total_contribution
+        ) * 100
 
         # =================================================
         # REMOVE VERY SMALL CONTRIBUTIONS
-        # ONLY KEEP > 0.5%
         # =================================================
 
         contribution_df = contribution_df[
@@ -484,12 +499,12 @@ if submit:
         # =================================================
 
         contribution_df = contribution_df.sort_values(
-            by="ContributionPercent",
+            by="Contribution",
             ascending=True
         )
 
         # =================================================
-        # SHOW GRAPH ONLY IF FEATURES EXIST
+        # DISPLAY GRAPH
         # =================================================
 
         if len(contribution_df) > 0:
@@ -498,22 +513,22 @@ if submit:
 
                 contribution_df,
 
-                x="ContributionPercent",
+                x="Contribution",
 
                 y="Feature",
 
                 orientation="h",
 
-                height=600,
+                text=contribution_df[
+                    "ContributionPercent"
+                ].round(2).astype(str) + "%",
 
-                title="Feature Influence on Current Prediction",
+                height=700,
 
-                text="ContributionPercent"
+                title="Feature Influence on Current Prediction"
             )
 
             contribution_fig.update_traces(
-
-                texttemplate='%{text:.2f}%',
 
                 textposition="outside"
             )
@@ -531,7 +546,7 @@ if submit:
                     b=20
                 ),
 
-                xaxis_title="Contribution (%)",
+                xaxis_title="Feature Contribution",
 
                 yaxis_title="",
 
@@ -540,37 +555,6 @@ if submit:
 
             st.plotly_chart(
                 contribution_fig,
-                use_container_width=True
-            )
-
-            # =================================================
-            # DETAILED TABLE
-            # =================================================
-
-            st.subheader(
-                "Detailed Feature Influence"
-            )
-
-            display_df = contribution_df.sort_values(
-                by="ContributionPercent",
-                ascending=False
-            )[
-                ["Feature", "ContributionPercent"]
-            ]
-
-            display_df["ContributionPercent"] = (
-                display_df["ContributionPercent"]
-                .round(2)
-                .astype(str) + "%"
-            )
-
-            display_df.columns = [
-                "Feature",
-                "Contribution"
-            ]
-
-            st.dataframe(
-                display_df,
                 use_container_width=True
             )
 
@@ -651,6 +635,3 @@ if submit:
 
 st.divider()
 
-st.caption(
-    "Cargo Safety Analytics Dashboard | CatBoostRegressor"
-)
